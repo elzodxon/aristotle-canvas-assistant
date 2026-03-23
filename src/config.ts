@@ -69,6 +69,11 @@ export interface MicrosoftGraphConfig {
   timeZone: string;
 }
 
+export interface TelegramConfig {
+  botToken: string;
+  chatId?: string;
+}
+
 export function loadLocalEnv(): void {
   if (envLoaded) {
     return;
@@ -221,5 +226,21 @@ export function getMicrosoftGraphConfig(): MicrosoftGraphConfig {
     timeZone,
     ...(todoListId ? { todoListId } : {}),
     ...(calendarId ? { calendarId } : {}),
+  };
+}
+
+export function getTelegramConfig(): TelegramConfig {
+  loadLocalEnv();
+
+  const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
+
+  if (!botToken) {
+    throw new Error("Missing TELEGRAM_BOT_TOKEN in .env.");
+  }
+
+  return {
+    botToken,
+    ...(chatId ? { chatId } : {}),
   };
 }

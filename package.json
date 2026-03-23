@@ -31,6 +31,7 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "skill:install": "bash scripts/install-skill.sh",
+    "setup": "tsx src/index.ts setup",
     "demo": "tsx src/index.ts demo",
     "intake": "tsx src/index.ts intake",
     "sync": "tsx src/index.ts sync",
@@ -73,6 +74,12 @@
     "microsoft:todo-preview": "tsx src/index.ts microsoft todo-preview",
     "microsoft:todo-create": "tsx src/index.ts microsoft todo-create",
     "microsoft:todo-from-task": "tsx src/index.ts microsoft todo-from-task",
+    "telegram:profile": "tsx src/index.ts telegram profile",
+    "telegram:send": "tsx src/index.ts telegram send",
+    "telegram:send-file": "tsx src/index.ts telegram send-file",
+    "generate:download": "tsx src/index.ts generate download",
+    "generate:list": "tsx src/index.ts generate list",
+    "generate:send": "tsx src/index.ts generate send",
     "state": "tsx src/index.ts state",
     "test": "tsx --test test/**/*.test.ts"
   },
@@ -80,6 +87,9 @@
     "@types/node": "^24.5.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.1",

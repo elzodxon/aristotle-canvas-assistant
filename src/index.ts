@@ -1,5 +1,6 @@
 import { loadAssignmentFromFile, enqueueAssignment, parseAssignmentBrief } from "./pipeline/intake.js";
 import { promptForAssignmentBrief } from "./interactive/intake-wizard.js";
+import { runSetupWizard } from "./interactive/setup-wizard.js";
 import { syncAristotle } from "./pipeline/sync.js";
 import { listTasks, updateTaskStatus } from "./pipeline/tasks.js";
 import {
@@ -9,6 +10,7 @@ import {
   getGoogleTasksConfig,
   getMicrosoftGraphConfig,
   getNotionConfig,
+  getTelegramConfig,
   getTrelloConfig,
   getTodoistConfig,
   loadLocalEnv,
@@ -28,6 +30,14 @@ import { TodoistClient } from "./connectors/todoist.js";
 import { NotionClient } from "./connectors/notion.js";
 import { GoogleTasksClient } from "./connectors/google-tasks.js";
 import { MicrosoftGraphClient } from "./connectors/microsoft-graph.js";
+import { TelegramClient } from "./connectors/telegram.js";
+import {
+  fetchAssignmentDetails,
+  downloadAssignmentFiles,
+  listCourseAssignments,
+  getStudentName,
+  getCourseName,
+} from "./pipeline/generate-pdf.js";
 import {
   buildExternalCalendarDraft,
   buildExternalTaskDraft,
@@ -42,6 +52,11 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(3));
   const dataDir = getDataDir();
   const store = new FileAristotleStore(dataDir);
+
+  if (command === "setup") {
+    await runSetupWizard();
+    return;
+  }
 
   if (command === "demo") {
     console.log(await runDemo(store, dataDir));
@@ -170,13 +185,23 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "telegram") {
+    await runTelegramCommand(args);
+    return;
+  }
+
+  if (command === "generate") {
+    await runGenerateCommand(args);
+    return;
+  }
+
   if (command === "state") {
     console.log(JSON.stringify(await readState(store), null, 2));
     return;
   }
 
   console.error(
-    "Unknown command. Use `demo`, `intake`, `tasks`, `task`, `sync`, `updates`, `prep`, `courses`, `publish`, `canvas`, `google`, `google-tasks`, `trello`, `todoist`, `notion`, `microsoft`, or `state`.",
+    "Unknown command. Use `setup`, `demo`, `intake`, `tasks`, `task`, `sync`, `updates`, `prep`, `courses`, `publish`, `canvas`, `google`, `google-tasks`, `trello`, `todoist`, `notion`, `microsoft`, `telegram`, `generate`, or `state`.",
   );
   process.exitCode = 1;
 }
@@ -995,5 +1020,141 @@ async function runMicrosoftCommand(
 
   throw new Error(
     "Use `npm run microsoft:profile`, `npm run microsoft:calendar-preview`, `npm run microsoft:calendar-create`, `npm run microsoft:calendar-from-task`, `npm run microsoft:todo-lists`, `npm run microsoft:todo-preview`, `npm run microsoft:todo-create`, or `npm run microsoft:todo-from-task`.",
+  );
+}
+
+async function runTelegramCommand(
+  args: ReturnType<typeof parseArgs>,
+): Promise<void> {
+  const subcommand = args.positionals[0] ?? "profile";
+  const client = new TelegramClient(getTelegramConfig());
+
+  if (subcommand === "profile") {
+    console.log(JSON.stringify(await client.getMe(), null, 2));
+    return;
+  }
+
+  if (subcommand === "send") {
+    const message = readStringFlag(args, "message") ?? readStringFlag(args, "msg");
+    const chatId = readStringFlag(args, "chat-id");
+
+    if (!message) {
+      throw new Error(
+        "Use `npm run telegram:send -- --message \"...\" [--chat-id <id>]`.",
+      );
+    }
+
+    const result = await client.sendMessage(message, chatId ?? undefined);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subcommand === "send-file") {
+    const filePath = readStringFlag(args, "file");
+    const caption = readStringFlag(args, "caption");
+    const chatId = readStringFlag(args, "chat-id");
+
+    if (!filePath) {
+      throw new Error(
+        "Use `npm run telegram:send-file -- --file <path> [--caption \"...\"] [--chat-id <id>]`.",
+      );
+    }
+
+    const result = await client.sendDocument(filePath, caption ?? undefined, chatId ?? undefined);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  throw new Error(
+    "Use `npm run telegram:profile`, `npm run telegram:send`, or `npm run telegram:send-file`.",
+  );
+}
+
+async function runGenerateCommand(
+  args: ReturnType<typeof parseArgs>,
+): Promise<void> {
+  const subcommand = args.positionals[0] ?? "download";
+  const config = getCanvasConfig();
+
+  if (subcommand === "download") {
+    const courseId = readNumberFlag(args, "course-id");
+    const assignmentId = readNumberFlag(args, "assignment-id");
+    const outputDir = readStringFlag(args, "output") ?? "generated";
+
+    if (!courseId || !assignmentId) {
+      throw new Error(
+        "Use `npm run generate:download -- --course-id <id> --assignment-id <id> [--output <dir>]`.",
+      );
+    }
+
+    const { assignment, attachedFileIds } = await fetchAssignmentDetails(
+      config,
+      courseId,
+      assignmentId,
+    );
+
+    console.log(`Assignment: ${assignment.name}`);
+    console.log(`Points: ${assignment.points_possible}`);
+    console.log(`Due: ${assignment.due_at ?? "no deadline"}`);
+    console.log(`Attached files: ${attachedFileIds.length}`);
+
+    if (attachedFileIds.length > 0) {
+      const paths = await downloadAssignmentFiles(config, courseId, attachedFileIds, outputDir);
+      for (const p of paths) {
+        console.log(`Downloaded: ${p}`);
+      }
+    }
+
+    return;
+  }
+
+  if (subcommand === "list") {
+    const courseId = readNumberFlag(args, "course-id");
+
+    if (!courseId) {
+      throw new Error("Use `npm run generate:list -- --course-id <id>`.");
+    }
+
+    const assignments = await listCourseAssignments(config, courseId);
+    const now = new Date();
+    const relevant = assignments.filter((a) => {
+      if (!a.due_at) return a.submission_types[0] !== "none";
+      return new Date(a.due_at) > new Date("2025-01-01");
+    });
+
+    for (const a of relevant) {
+      const status = a.due_at && new Date(a.due_at) < now ? "PAST DUE" : "upcoming";
+      console.log(
+        `[${status}] ${a.name} | ${a.points_possible} pts | due: ${a.due_at ?? "none"} | types: ${a.submission_types.join(",")}`,
+      );
+    }
+
+    return;
+  }
+
+  if (subcommand === "send") {
+    const filePath = readStringFlag(args, "file");
+    const chatId = readStringFlag(args, "chat-id");
+    const caption = readStringFlag(args, "caption");
+
+    if (!filePath) {
+      throw new Error(
+        "Use `npm run generate:send -- --file <path> [--caption \"...\"] [--chat-id <id>]`.",
+      );
+    }
+
+    const telegramClient = new TelegramClient(getTelegramConfig());
+    const result = await telegramClient.sendDocument(
+      filePath,
+      caption ?? undefined,
+      chatId ?? undefined,
+    );
+    console.log(`File sent via Telegram.`);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  throw new Error(
+    "Use `npm run generate:download`, `npm run generate:list`, or `npm run generate:send`.",
   );
 }
