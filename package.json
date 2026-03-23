@@ -88,6 +88,9 @@
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.1",
     "googleapis": "^171.4.0"
